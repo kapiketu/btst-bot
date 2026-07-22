@@ -7,9 +7,37 @@ from config import STOCK_UNIVERSE
 
 logger = logging.getLogger(__name__)
 
+from datetime import date
+
+# Official NSE Trading Holidays for 2026
+NSE_HOLIDAYS_2026 = {
+    "2026-01-26", # Republic Day
+    "2026-03-08", # Mahashivratri
+    "2026-03-25", # Holi
+    "2026-03-29", # Good Friday
+    "2026-04-11", # Id-Ul-Fitr
+    "2026-04-14", # Dr. Baba Saheb Ambedkar Jayanti
+    "2026-04-17", # Shri Ram Navami
+    "2026-04-21", # Mahavir Jayanti
+    "2026-05-01", # Maharashtra Day
+    "2026-06-17", # Bakri Id
+    "2026-07-17", # Muharram
+    "2026-08-15", # Independence Day
+    "2026-10-02", # Mahatma Gandhi Jayanti
+    "2026-10-24", # Dussehra
+    "2026-11-01", # Diwali Laxmi Pujan
+    "2026-11-15", # Gurunanak Jayanti
+    "2026-12-25", # Christmas
+}
+
 class NSEScanner:
     def __init__(self, stock_list: List[str] = None):
         self.stock_list = stock_list or STOCK_UNIVERSE
+
+    def is_market_holiday(self) -> bool:
+        """Check if today is an official NSE trading holiday."""
+        today_str = date.today().strftime("%Y-%m-%d")
+        return today_str in NSE_HOLIDAYS_2026
 
     def fetch_stock_indicators(self, symbol: str) -> Dict:
         """Fetch market data and compute indicators (RVOL, EMA, ATR, 52W High, Relative Strength)."""

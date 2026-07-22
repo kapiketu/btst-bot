@@ -77,6 +77,12 @@ def run_evening_scan():
     scoring_engine = ScoringEngine()
     notifier = TelegramNotifier()
 
+    # Check for NSE Market Holiday
+    if scanner.is_market_holiday():
+        logger.info("Today is an official NSE Trading Holiday. Skipping scan.")
+        notifier.send_message("🏖️ <b>NSE Market Holiday:</b> Indian stock market is closed today for a trading holiday. Enjoy your day!")
+        return
+
     # 1. Fetch market data
     all_stocks = scanner.scan_market()
     if not all_stocks:
