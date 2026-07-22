@@ -48,6 +48,27 @@ def run_morning_brief():
     global_cues = monitor.get_global_cues()
     notifier.send_morning_brief(gift_status, global_cues)
 
+import json
+
+ACTIVE_TRADES_FILE = "active_trades.json"
+
+def save_active_trades(trades):
+    try:
+        with open(ACTIVE_TRADES_FILE, "w") as f:
+            json.dump(trades, f, indent=2)
+        logger.info(f"Saved {len(trades)} active trades to {ACTIVE_TRADES_FILE}")
+    except Exception as e:
+        logger.error(f"Error saving active trades: {e}")
+
+def load_active_trades():
+    try:
+        if os.path.exists(ACTIVE_TRADES_FILE):
+            with open(ACTIVE_TRADES_FILE, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading active trades: {e}")
+    return []
+
 def run_evening_scan():
     """02:30 PM - 03:10 PM Task: Scan market, score stocks, analyze with AI, send buy alerts."""
     logger.info("Starting Quantitative BTST Stock Scan...")
@@ -86,36 +107,47 @@ def run_evening_scan():
     if not top_picks:
         logger.info("No candidates passed the high-conviction quality score threshold today.")
         notifier.send_message("ℹ️ <b>BTST Scan Complete:</b> No stocks met the strict 70+ quality score threshold today.")
+        save_active_trades([])
         return
 
     logger.info(f"Selected top {len(top_picks)} BTST picks.")
+    save_active_trades(top_picks)
     for pick in top_picks:
         notifier.send_buy_signal(pick)
 
-def run_morning_exit_monitor(symbol_list=None):
+def run_morning_exit_monitor():
     """09:15 AM - 10:00 AM Task: Monitor open position for target (+0.60%) or stop loss."""
     logger.info("Running Morning Exit Tracker...")
     notifier = TelegramNotifier()
     scanner = NSEScanner()
     
-    if not symbol_list:
-        logger.info("No active tracked symbols provided for morning exit check.")
+    active_trades = load_active_trades()
+    if not active_trades:
+        logger.info("No active tracked trades from yesterday.")
         return
 
-    for symbol in symbol_list:
+    for trade in active_trades:
+        symbol = trade["symbol"]
+        entry_price = trade["cmp"]
+        target_price = trade["target_price"]
+        sl_price = trade["stop_loss_price"]
+
         data = scanner.fetch_stock_indicators(symbol)
         if not data:
             continue
 
         cmp_val = data["cmp"]
-        # Assuming entry from yesterday close/CMP
-        # Compare return
-        entry_price = data["cmp"]  # Placeholder for live tracked entry
-        target_val = entry_price * (1.0 + (PROFIT_TARGET_PCT / 100.0))
-        sl_val = entry_price * (1.0 - (STOP_LOSS_PCT / 100.0))
+        return_pct = ((cmp_val - entry_price) / entry_price) * 100.0
 
-        return_pct = 0.60  # Default demo return
-        notifier.send_exit_alert(symbol, "TARGET_HIT", target_val, return_pct)
+        if cmp_val >= target_price:
+            notifier.send_exit_alert(symbol, "TARGET_HIT", cmp_val, return_pct)
+        elif cmp_val <= sl_price:
+            notifier.send_exit_alert(symbol, "STOP_LOSS", cmp_val, return_pct)
+        else:
+            notifier.send_exit_alert(symbol, "TIME_EXIT", cmp_val, return_pct)
+
+    # Reset active trades after morning check
+    save_active_trades([])
 
 def start_scheduler():
     """Start daemon scheduler for automated daily operations."""
@@ -125,6 +157,7 @@ def start_scheduler():
     logger.info("BTST Bot Scheduler Running... Press Ctrl+C to exit.")
     
     schedule.every().day.at("08:00").do(run_morning_brief)
+    schedule.every().day.at("09:15").do(run_morning_exit_monitor)
     schedule.every().day.at("15:10").do(run_evening_scan)
     
     while True:
