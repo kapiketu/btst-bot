@@ -12,6 +12,10 @@ from modules.scoring_engine import ScoringEngine
 from modules.telegram_bot import TelegramNotifier
 from modules.overnight_monitor import OvernightMonitor
 
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
 # Configure Logging
 logging.basicConfig(
     level=logging.INFO,
@@ -19,6 +23,20 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger("BTSTBot")
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"BTST Bot Active and Healthy")
+    def log_message(self, format, *args):
+        return  # Suppress HTTP access logs
+
+def start_health_server():
+    port = int(os.getenv("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    logger.info(f"Health check HTTP server listening on port {port}")
+    server.serve_forever()
 
 def run_morning_brief():
     """08:00 AM Task: Send pre-market overview to Telegram."""
@@ -101,6 +119,9 @@ def run_morning_exit_monitor(symbol_list=None):
 
 def start_scheduler():
     """Start daemon scheduler for automated daily operations."""
+    # Start background health server for Render port binding
+    threading.Thread(target=start_health_server, daemon=True).start()
+    
     logger.info("BTST Bot Scheduler Running... Press Ctrl+C to exit.")
     
     schedule.every().day.at("08:00").do(run_morning_brief)
