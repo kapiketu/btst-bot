@@ -16,19 +16,40 @@ import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+LOG_BUFFER = []
+
+class ListLogHandler(logging.Handler):
+    def emit(self, record):
+        log_entry = self.format(record)
+        LOG_BUFFER.append(log_entry)
+        if len(LOG_BUFFER) > 100:
+            LOG_BUFFER.pop(0)
+
 # Configure Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
+log_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setFormatter(log_formatter)
+list_handler = ListLogHandler()
+list_handler.setFormatter(log_formatter)
+
 logger = logging.getLogger("BTSTBot")
+logger.setLevel(logging.INFO)
+logger.addHandler(stream_handler)
+logger.addHandler(list_handler)
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"BTST Bot Active and Healthy")
+        if self.path == "/logs":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            log_content = "\n".join(LOG_BUFFER)
+            self.wfile.write(log_content.encode("utf-8"))
+        else:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"BTST Bot Active and Healthy")
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
