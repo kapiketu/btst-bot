@@ -3,7 +3,12 @@ import argparse
 import logging
 import schedule
 import time
+import os
 from datetime import datetime
+
+# Force Python timezone to sync with Render TZ env variable (Asia/Kolkata)
+if hasattr(time, "tzset"):
+    time.tzset()
 
 from config import SCORE_THRESHOLD, MIN_RVOL, PROFIT_TARGET_PCT, STOP_LOSS_PCT
 from modules.nse_scanner import NSEScanner
