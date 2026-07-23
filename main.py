@@ -6,9 +6,15 @@ import time
 import os
 from datetime import datetime
 
-# Force Python timezone to sync with Render TZ env variable (Asia/Kolkata)
-if hasattr(time, "tzset"):
-    time.tzset()
+from datetime import datetime, timedelta, timezone
+
+# India Time (IST) is UTC + 5:30. Let's make logs print in IST.
+def ist_time_converter(*args):
+    utc_dt = datetime.now(timezone.utc)
+    ist_dt = utc_dt + timedelta(hours=5, minutes=30)
+    return ist_dt.timetuple()
+
+logging.Formatter.converter = ist_time_converter
 
 from config import SCORE_THRESHOLD, MIN_RVOL, PROFIT_TARGET_PCT, STOP_LOSS_PCT
 from modules.nse_scanner import NSEScanner
@@ -17,7 +23,6 @@ from modules.scoring_engine import ScoringEngine
 from modules.telegram_bot import TelegramNotifier
 from modules.overnight_monitor import OvernightMonitor
 
-import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -191,9 +196,9 @@ def start_scheduler():
     
     logger.info("BTST Bot Scheduler Running... Press Ctrl+C to exit.")
     
-    schedule.every().day.at("08:00").do(run_morning_brief)
-    schedule.every().day.at("09:15").do(run_morning_exit_monitor)
-    schedule.every().day.at("15:10").do(run_evening_scan)
+    schedule.every().day.at("02:30").do(run_morning_brief)       # 08:00 AM IST
+    schedule.every().day.at("03:45").do(run_morning_exit_monitor) # 09:15 AM IST
+    schedule.every().day.at("09:40").do(run_evening_scan)          # 03:10 PM IST
     
     while True:
         schedule.run_pending()
