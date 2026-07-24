@@ -203,21 +203,47 @@ class HealthHandler(BaseHTTPRequestHandler):
                         logger.info("Routing to ask_ai chat response...")
                         notifier.send_message("🔍 <i>Analyzing market cues...</i>")
                         
-                        # Attempt to fetch live price context if a stock was mentioned
-                        context_str = None
+                        # Build a rich, real-time market context
+                        master_context_parts = []
+                        
+                        # 1. Fetch live Nifty index level
+                        try:
+                            scanner = NSEScanner()
+                            nifty_data = scanner.fetch_stock_indicators("^NSEI")
+                            if nifty_data and "cmp" in nifty_data:
+                                master_context_parts.append(f"Live Market Index: Nifty 50 is currently at {nifty_data['cmp']:.2f}.")
+                        except Exception as e:
+                            logger.error(f"Failed to fetch Nifty context: {e}")
+                            
+                        # 2. Fetch live price of the mentioned stock (if any)
                         if found_symbol:
                             try:
                                 scanner = NSEScanner()
                                 stock_data = scanner.fetch_stock_indicators(found_symbol)
                                 if stock_data and "cmp" in stock_data:
                                     clean_sym = found_symbol.replace(".NS", "")
-                                    context_str = f"Live Market Context: {clean_sym} is currently trading at ₹{stock_data['cmp']:.2f} today."
-                                    logger.info(f"Attached live context to Gemini: '{context_str}'")
+                                    master_context_parts.append(f"Live Price Check: {clean_sym} is trading at ₹{stock_data['cmp']:.2f} today.")
                             except Exception as e:
-                                logger.error(f"Failed to fetch live price for context: {e}")
+                                logger.error(f"Failed to fetch stock context: {e}")
                                 
+                        # 3. Read active trades from database
+                        try:
+                            active_trades = load_active_trades()
+                            if active_trades:
+                                active_list = []
+                                for t in active_trades:
+                                    sym = t["symbol"].replace(".NS", "")
+                                    active_list.append(f"{sym} (Entry: ₹{t['cmp']:.2f}, Target: ₹{t['target_price']:.2f}, SL: ₹{t['stop_loss_price']:.2f})")
+                                master_context_parts.append(f"Active Tracked Positions: " + ", ".join(active_list))
+                        except Exception as e:
+                            logger.error(f"Failed to fetch active trades context: {e}")
+                            
+                        master_context = "\n".join(master_context_parts) if master_context_parts else None
+                        if master_context:
+                            logger.info(f"Attached live context to Gemini: '{master_context}'")
+                            
                         ai = AIEngine()
-                        ai_reply = ai.ask_ai(text, context_str)
+                        ai_reply = ai.ask_ai(text, master_context)
                         logger.info(f"Received Gemini reply: {ai_reply[:50]}...")
                         # Try sending as HTML first, fallback to plain text if Telegram rejects HTML tags
                         success = notifier.send_message(ai_reply, parse_mode="HTML")

@@ -101,8 +101,8 @@ class AIEngine:
             "rationale": str(data.get("rationale", "Strong volume breakout setup."))
         }
 
-    def ask_ai(self, question: str) -> str:
-        """Answer general financial market questions."""
+    def ask_ai(self, question: str, context: str = None) -> str:
+        """Answer general financial market questions, optionally using real-time context."""
         if not self.api_key or self.api_key.startswith("your_"):
             return "❌ Gemini API key not configured."
 
@@ -110,11 +110,18 @@ class AIEngine:
             "You are a professional Indian Stock Market analyst and financial assistant. "
             "Provide a helpful, concise, and technically accurate answer to the user's question. "
             "Keep the response under 150 words. "
+            "STRICT DOMAIN GUARDRAIL: You are ONLY allowed to discuss the stock market, investments, "
+            "trading, corporate news, economics, or general finance. If the user asks about coding, "
+            "personal advice, recipes, history, or anything unrelated to finance, you MUST politely "
+            "refuse to answer and say: '❌ I am a stock market virtual assistant. I only answer questions related to financial markets.'\n"
             "IMPORTANT: Telegram HTML mode ONLY supports <b>bold</b>, <i>italic</i>, <u>underline</u>, "
             "<s>strikethrough</s>, and <code>code</code>. "
             "Do NOT output markdown (like ** or ```) and do NOT output paragraphs (<p>) or divisions (<div>)."
         )
-        prompt = f"{system_instruction}\n\nUser Question: {question}"
+        prompt = f"{system_instruction}\n\n"
+        if context:
+            prompt += f"<b>{context}</b>\n\n"
+        prompt += f"User Question: {question}"
 
         try:
             if self.provider == "gemini":
