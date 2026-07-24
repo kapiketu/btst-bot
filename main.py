@@ -145,7 +145,7 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def handle_custom_entry_command(self, symbol: str, entry_price: float, quantity: int = None):
-        """Update active trade with custom entry price and quantity, recalculating targets."""
+        """Update active trade or add a new trade dynamically, recalculating targets."""
         notifier = TelegramNotifier()
         active_trades = load_active_trades()
         found = False
@@ -162,26 +162,37 @@ class HealthHandler(BaseHTTPRequestHandler):
                 found = True
                 break
                 
-        if found:
+        if not found:
+            # Create a new trade entry dynamically!
+            qty = quantity if quantity else 1
+            new_trade = {
+                "symbol": symbol,
+                "cmp": entry_price,
+                "rec_shares": qty,
+                "rec_capital": round(qty * entry_price, 2),
+                "target_price": round(entry_price * (1.0 + (PROFIT_TARGET_PCT / 100.0)), 2),
+                "stop_loss_price": round(entry_price * (1.0 - (STOP_LOSS_PCT / 100.0)), 2),
+                "score": 100.0,
+                "rvol": 1.0
+            }
+            active_trades.append(new_trade)
             save_active_trades(active_trades)
-            clean_symbol = symbol.replace(".NS", "")
-            target = next(t["target_price"] for t in active_trades if t["symbol"] == symbol)
-            sl = next(t["stop_loss_price"] for t in active_trades if t["symbol"] == symbol)
-            qty = next(t["rec_shares"] for t in active_trades if t["symbol"] == symbol)
-            capital = next(t["rec_capital"] for t in active_trades if t["symbol"] == symbol)
             
-            msg = (
-                f"✅ <b>Entry Updated for {clean_symbol}</b>\n\n"
-                f"• Entry Price: ₹{entry_price:.2f}\n"
-                f"• Quantity: {qty} shares (~₹{capital:.0f})\n"
-                f"• Target (+0.60%): 🎯 <b>₹{target:.2f}</b>\n"
-                f"• Stop Loss (-1.50%): 🛡️ <b>₹{sl:.2f}</b>\n\n"
-                f"<i>Exit alerts will now trigger at these updated levels.</i>"
-            )
-            notifier.send_message(msg)
-        else:
-            clean_symbol = symbol.replace(".NS", "")
-            notifier.send_message(f"❌ <b>Stock {clean_symbol} not found</b> in yesterday's active BTST list.")
+        clean_symbol = symbol.replace(".NS", "")
+        target = next(t["target_price"] for t in active_trades if t["symbol"] == symbol)
+        sl = next(t["stop_loss_price"] for t in active_trades if t["symbol"] == symbol)
+        qty = next(t["rec_shares"] for t in active_trades if t["symbol"] == symbol)
+        capital = next(t["rec_capital"] for t in active_trades if t["symbol"] == symbol)
+        
+        msg = (
+            f"✅ <b>Entry Updated for {clean_symbol}</b>\n\n"
+            f"• Entry Price: ₹{entry_price:.2f}\n"
+            f"• Quantity: {qty} shares (~₹{capital:.0f})\n"
+            f"• Target (+0.60%): 🎯 <b>₹{target:.2f}</b>\n"
+            f"• Stop Loss (-1.50%): 🛡️ <b>₹{sl:.2f}</b>\n\n"
+            f"<i>Exit alerts will now trigger at these updated levels.</i>"
+        )
+        notifier.send_message(msg)
 
     def handle_close_trade_command(self, symbol: str, exit_price: float):
         """Close trade, calculate P&L, update journal file, and notify user."""
