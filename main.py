@@ -72,27 +72,42 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.end_headers()
             
             try:
+                import re
+                from config import STOCK_UNIVERSE
+                
                 update = json.loads(post_data.decode("utf-8"))
                 message = update.get("message", {})
                 text = message.get("text", "").strip()
                 chat_id = message.get("chat", {}).get("id")
                 
-                # Check for /buy or /entry command
-                if text.lower().startswith(("/buy", "/entry")) and chat_id:
-                    parts = text.split()
-                    if len(parts) >= 3:
-                        symbol = parts[1].upper()
-                        if not symbol.endswith(".NS"):
-                            symbol += ".NS"
-                        try:
-                            custom_entry = float(parts[2])
-                            self.handle_custom_entry_command(symbol, custom_entry)
-                        except ValueError:
-                            notifier = TelegramNotifier()
-                            notifier.send_message("❌ <b>Invalid format.</b> Use: <code>/buy JSWSTEEL 1265.50</code>")
-                    else:
-                        notifier = TelegramNotifier()
-                        notifier.send_message("❌ <b>Invalid format.</b> Use: <code>/buy JSWSTEEL 1265.50</code>")
+                if not text or not chat_id:
+                    return
+
+                # Smart Parsing: Look for any stock symbol from STOCK_UNIVERSE in the text
+                found_symbol = None
+                upper_text = text.upper()
+                for stock in STOCK_UNIVERSE:
+                    clean_stock = stock.replace(".NS", "")
+                    # Match clean stock symbol in text (e.g. JSWSTEEL or BAJAJ-AUTO)
+                    if clean_stock in upper_text:
+                        found_symbol = stock
+                        break
+
+                # Look for the first price/decimal number in the text (e.g. 1265 or 1265.50)
+                numbers = re.findall(r"\d+\.?\d*", text)
+                found_price = None
+                for num in numbers:
+                    val = float(num)
+                    if val > 10.0:  # Ignore small numbers like quantities or commands
+                        found_price = val
+                        break
+
+                if found_symbol and found_price:
+                    self.handle_custom_entry_command(found_symbol, found_price)
+                else:
+                    # Fallback helper if only partial info is sent
+                    notifier = TelegramNotifier()
+                    notifier.send_message("💡 <b>Tip:</b> To update your entry, just type the stock name and your price. Example: <code>JSWSTEEL 1265</code>")
             except Exception as e:
                 logger.error(f"Error handling Telegram webhook POST: {e}")
         else:
