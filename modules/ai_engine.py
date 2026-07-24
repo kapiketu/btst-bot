@@ -16,10 +16,23 @@ class AIEngine:
 
     def analyze_stock(self, stock_metrics: dict) -> dict:
         """Analyze a candidate stock and return a sentiment score (0-100) and brief rationale."""
-        symbol = stock_metrics['symbol'].replace('.NS', '')
+        symbol = stock_metrics['symbol']
         cmp_val = stock_metrics['cmp']
         rvol = stock_metrics['rvol']
         dist_52w = stock_metrics['dist_from_52w_high_pct']
+
+        # Fetch recent corporate news headlines using yfinance
+        news_summary = ""
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker(symbol)
+            news_items = ticker.news
+            if news_items:
+                news_summary = "Recent Corporate News & Events:\n"
+                for item in news_items[:3]:
+                    news_summary += f"- {item.get('title')} ({item.get('publisher')})\n"
+        except Exception as e:
+            logger.error(f"Failed to fetch news for {symbol}: {e}")
 
         if not self.api_key or self.api_key.startswith("your_"):
             logger.info("No AI API key found. Using quantitative fallback rationale.")
@@ -27,13 +40,21 @@ class AIEngine:
 
         prompt = (
             f"You are a professional Indian equity quantitative analyst evaluating a BTST (Buy Today Sell Tomorrow) stock.\n"
-            f"Stock Symbol: {symbol}\n"
+            f"Stock Symbol: {symbol.replace('.NS', '')}\n"
             f"Current Price: ₹{cmp_val:.2f}\n"
             f"Volume Spike (RVOL): {rvol:.2f}x average 20-day volume\n"
             f"Distance from 52-Week High: {dist_52w:.2f}%\n"
+        )
+        if news_summary:
+            prompt += f"\n{news_summary}\n"
+            
+        prompt += (
             f"Target: +0.60% profit next morning.\n\n"
+            f"Evaluate both the technical indicators and the recent news sentiment. "
+            f"If there is negative news (e.g. regulatory fines, bad earnings, CEO exit), give it a low score (<60) to reject it. "
+            f"If the news is positive or neutral, score it based on the technical breakout.\n\n"
             f"Respond ONLY in valid JSON format with keys:\n"
-            f'{{"sentiment_score": <number 0 to 100>, "rationale": "<2-sentence technical rationale>"}}'
+            f'{{"sentiment_score": <number 0 to 100>, "rationale": "<2-sentence technical and news sentiment rationale>"}}'
         )
 
         try:
