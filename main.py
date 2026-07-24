@@ -82,6 +82,8 @@ class HealthHandler(BaseHTTPRequestHandler):
                 
                 if not text or not chat_id:
                     return
+                    
+                logger.info(f"Received Telegram message: '{text}' (chat_id: {chat_id})")
 
                 # Smart Parsing: Look for any stock symbol from STOCK_UNIVERSE in the text
                 found_symbol = None
@@ -107,39 +109,41 @@ class HealthHandler(BaseHTTPRequestHandler):
                 for num in numbers:
                     val = float(num)
                     if val > 10.0:  # Ignore small numbers like quantities or commands
-                        # If we haven't found a separate quantity, check if another integer exists
                         if found_price is None:
                             found_price = val
                     elif val <= 10.0 and found_qty is None:
-                        # Fallback: small number might be the quantity (e.g., JSWSTEEL 1265 7)
                         try:
                             found_qty = int(val)
                         except ValueError:
                             pass
+
+                logger.info(f"Parsed: found_symbol={found_symbol}, found_price={found_price}, found_qty={found_qty}")
 
                 # Detect if the message is a close/sell command
                 is_exit = any(k in text.lower() for k in ["sold", "close", "exit", "out", "booked", "sell"])
 
                 if found_symbol and found_price:
                     if is_exit:
+                        logger.info(f"Routing to handle_close_trade_command: {found_symbol} at {found_price}")
                         self.handle_close_trade_command(found_symbol, found_price)
                     else:
+                        logger.info(f"Routing to handle_custom_entry_command: {found_symbol} at {found_price} (qty: {found_qty})")
                         self.handle_custom_entry_command(found_symbol, found_price, found_qty)
                 else:
                     # General Q&A / Chat mode
-                    # If user sends a command like /start, ignore or send welcome message.
-                    # Otherwise, query Gemini to answer their question.
                     notifier = TelegramNotifier()
                     if text.startswith("/start"):
                         notifier.send_message("👋 <b>Welcome to your BTST Bot!</b>\n\n• Type a stock name & price to track entry: e.g. <code>JSWSTEEL 1265</code>\n• Type exit/sold command: e.g. <code>sold JSWSTEEL 1276</code>\n• Or ask me any question about the stock market, sentiment, or indicators!")
                     else:
-                        # Call Gemini to generate a response
+                        logger.info("Routing to ask_ai chat response...")
                         notifier.send_message("🔍 <i>Analyzing market cues...</i>")
                         ai = AIEngine()
                         ai_reply = ai.ask_ai(text)
+                        logger.info(f"Received Gemini reply: {ai_reply[:50]}...")
                         notifier.send_message(ai_reply)
+                        logger.info("Sent reply to Telegram.")
             except Exception as e:
-                logger.error(f"Error handling Telegram webhook POST: {e}")
+                logger.exception(f"Error handling Telegram webhook POST: {e}")
         else:
             self.send_response(404)
             self.end_headers()
