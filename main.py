@@ -89,16 +89,77 @@ class HealthHandler(BaseHTTPRequestHandler):
                     
                 logger.info(f"Received Telegram message: '{text}' (chat_id: {chat_id})")
 
-                # Smart Parsing: Look for any stock symbol from STOCK_UNIVERSE in the text
+                # Smart Parsing: Look for any stock symbol from STOCK_UNIVERSE in the text using aliases
+                STOCK_ALIASES = {
+                    "BAJAJ-AUTO.NS": ["BAJAJAUTO", "BAJAAUTO", "BAJAJ", "BAJA"],
+                    "JSWSTEEL.NS": ["JSWSTEEL", "JSW", "JSW STEEL"],
+                    "TATASTEEL.NS": ["TATASTEEL", "TATA STEEL", "TATASTEEL"],
+                    "RELIANCE.NS": ["RELIANCE", "RELI"],
+                    "TCS.NS": ["TCS"],
+                    "INFY.NS": ["INFY", "INFOSYS"],
+                    "HDFCBANK.NS": ["HDFCBANK", "HDFC BANK", "HDFC"],
+                    "ICICIBANK.NS": ["ICICIBANK", "ICICI BANK", "ICICI"],
+                    "SBIN.NS": ["SBIN", "SBI", "STATE BANK"],
+                    "BHARTIARTL.NS": ["BHARTIARTL", "AIRTEL", "BHARTI"],
+                    "M&M.NS": ["MM", "MAHINDRA", "MANDM", "M & M"],
+                    "L&T.NS": ["LT", "LARSEN", "L AND T", "L & T"],
+                    "AXISBANK.NS": ["AXISBANK", "AXIS BANK", "AXIS"],
+                    "KOTAKBANK.NS": ["KOTAKBANK", "KOTAK BANK", "KOTAK"],
+                    "ITC.NS": ["ITC"],
+                    "HINDUNILVR.NS": ["HINDUNILVR", "HUL", "HINDUSTAN UNILEVER"],
+                    "ASIANPAINT.NS": ["ASIANPAINT", "ASIAN PAINTS", "ASIAN"],
+                    "MARUTI.NS": ["MARUTI", "SUZUKI"],
+                    "TITAN.NS": ["TITAN"],
+                    "ULTRACEMCO.NS": ["ULTRACEMCO", "ULTRATECH"],
+                    "POWERGRID.NS": ["POWERGRID", "POWER GRID"],
+                    "NTPC.NS": ["NTPC"],
+                    "ADANIENT.NS": ["ADANIENT", "ADANI ENTERPRISES", "ADANI"],
+                    "ADANIPORTS.NS": ["ADANIPORTS", "ADANI PORTS"],
+                    "ONGC.NS": ["ONGC"],
+                    "COALINDIA.NS": ["COALINDIA", "COAL INDIA", "COAL"],
+                    "SUNPHARMA.NS": ["SUNPHARMA", "SUN PHARMA", "SUN"],
+                    "JSWENERGY.NS": ["JSWENERGY", "JSW ENERGY"],
+                    "TATACOMM.NS": ["TATACOMM", "TATA COMMUNICATIONS", "TATA COMM"],
+                    "TATAMOTORS.NS": ["TATAMOTORS", "TATA MOTORS", "TATA MOTOR"],
+                    "WIPRO.NS": ["WIPRO"],
+                    "HCLTECH.NS": ["HCLTECH", "HCL TECH", "HCL"],
+                    "LTIM.NS": ["LTIM", "LTI MINDTREE", "LTIMINDTREE"],
+                    "TECHM.NS": ["TECHM", "TECH MAHINDRA", "TECH M"],
+                    "GRASIM.NS": ["GRASIM"],
+                    "JIOFIN.NS": ["JIOFIN", "JIO FINANCIAL", "JIO"],
+                    "BPCL.NS": ["BPCL", "BHARAT PETROLEUM"],
+                    "IOC.NS": ["IOC", "INDIAN OIL"],
+                    "HINDALCO.NS": ["HINDALCO"],
+                    "JINDALSTEL.NS": ["JINDALSTEL", "JINDAL STEEL", "JINDAL"],
+                    "VBL.NS": ["VBL", "VARUN BEVERAGES", "VARUN"],
+                    "BEL.NS": ["BEL", "BHARAT ELECTRONICS"],
+                    "HAL.NS": ["HAL", "HINDUSTAN AERONAUTICS"],
+                    "ZOMATO.NS": ["ZOMATO"],
+                    "JINDALSAW.NS": ["JINDALSAW", "JINDAL SAW"],
+                    "MOTHERSON.NS": ["MOTHERSON", "SAMVARDHANA"]
+                }
+                
                 found_symbol = None
                 normalized_text = re.sub(r"[^A-Z0-9]", "", text.upper())
-                for stock in STOCK_UNIVERSE:
-                    clean_stock = stock.replace(".NS", "")
-                    normalized_stock = re.sub(r"[^A-Z0-9]", "", clean_stock)
-                    # Match normalized stock symbol in text (e.g. BAJAJAUTO)
-                    if normalized_stock in normalized_text:
-                        found_symbol = stock
+                
+                # Check aliases
+                for stock, aliases in STOCK_ALIASES.items():
+                    for alias in aliases:
+                        normalized_alias = re.sub(r"[^A-Z0-9]", "", alias.upper())
+                        if normalized_alias in normalized_text:
+                            found_symbol = stock
+                            break
+                    if found_symbol:
                         break
+                        
+                # Fallback to standard universe check if no alias matched
+                if not found_symbol:
+                    for stock in STOCK_UNIVERSE:
+                        clean_stock = stock.replace(".NS", "")
+                        normalized_stock = re.sub(r"[^A-Z0-9]", "", clean_stock)
+                        if normalized_stock in normalized_text:
+                            found_symbol = stock
+                            break
 
                 # Look for the first price/decimal number in the text (e.g. 1265 or 1265.50)
                 numbers = re.findall(r"\d+\.?\d*", text)
@@ -141,8 +202,22 @@ class HealthHandler(BaseHTTPRequestHandler):
                     else:
                         logger.info("Routing to ask_ai chat response...")
                         notifier.send_message("🔍 <i>Analyzing market cues...</i>")
+                        
+                        # Attempt to fetch live price context if a stock was mentioned
+                        context_str = None
+                        if found_symbol:
+                            try:
+                                scanner = NSEScanner()
+                                stock_data = scanner.fetch_stock_indicators(found_symbol)
+                                if stock_data and "cmp" in stock_data:
+                                    clean_sym = found_symbol.replace(".NS", "")
+                                    context_str = f"Live Market Context: {clean_sym} is currently trading at ₹{stock_data['cmp']:.2f} today."
+                                    logger.info(f"Attached live context to Gemini: '{context_str}'")
+                            except Exception as e:
+                                logger.error(f"Failed to fetch live price for context: {e}")
+                                
                         ai = AIEngine()
-                        ai_reply = ai.ask_ai(text)
+                        ai_reply = ai.ask_ai(text, context_str)
                         logger.info(f"Received Gemini reply: {ai_reply[:50]}...")
                         # Try sending as HTML first, fallback to plain text if Telegram rejects HTML tags
                         success = notifier.send_message(ai_reply, parse_mode="HTML")
