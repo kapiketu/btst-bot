@@ -96,21 +96,41 @@ class HealthHandler(BaseHTTPRequestHandler):
                 # Look for the first price/decimal number in the text (e.g. 1265 or 1265.50)
                 numbers = re.findall(r"\d+\.?\d*", text)
                 found_price = None
+                found_qty = None
+                
+                # Check for explicit quantity keywords like "87 shares" or "qty 87"
+                qty_match = re.search(r"(\d+)\s*(?:shares|qty|quantity|sh|units)", text, re.IGNORECASE)
+                if qty_match:
+                    found_qty = int(qty_match.group(1))
+
                 for num in numbers:
                     val = float(num)
                     if val > 10.0:  # Ignore small numbers like quantities or commands
-                        found_price = val
-                        break
+                        # If we haven't found a separate quantity, check if another integer exists
+                        if found_price is None:
+                            found_price = val
+                    elif val <= 10.0 and found_qty is None:
+                        # Fallback: small number might be the quantity (e.g., JSWSTEEL 1265 7)
+                        try:
+                            found_qty = int(val)
+                        except ValueError:
+                            pass
+
+                # Detect if the message is a close/sell command
+                is_exit = any(k in text.lower() for k in ["sold", "close", "exit", "out", "booked", "sell"])
 
                 if found_symbol and found_price:
-                    self.handle_custom_entry_command(found_symbol, found_price)
+                    if is_exit:
+                        self.handle_close_trade_command(found_symbol, found_price)
+                    else:
+                        self.handle_custom_entry_command(found_symbol, found_price, found_qty)
                 else:
                     # General Q&A / Chat mode
                     # If user sends a command like /start, ignore or send welcome message.
                     # Otherwise, query Gemini to answer their question.
                     notifier = TelegramNotifier()
                     if text.startswith("/start"):
-                        notifier.send_message("👋 <b>Welcome to your BTST Bot!</b>\n\n• Type a stock name & price to track entry: e.g. <code>JSWSTEEL 1265</code>\n• Or ask me any question about the stock market, sentiment, or indicators!")
+                        notifier.send_message("👋 <b>Welcome to your BTST Bot!</b>\n\n• Type a stock name & price to track entry: e.g. <code>JSWSTEEL 1265</code>\n• Type exit/sold command: e.g. <code>sold JSWSTEEL 1276</code>\n• Or ask me any question about the stock market, sentiment, or indicators!")
                     else:
                         # Call Gemini to generate a response
                         notifier.send_message("🔍 <i>Analyzing market cues...</i>")
@@ -123,8 +143,8 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    def handle_custom_entry_command(self, symbol: str, entry_price: float):
-        """Update active trade with custom entry price and recalculate targets."""
+    def handle_custom_entry_command(self, symbol: str, entry_price: float, quantity: int = None):
+        """Update active trade with custom entry price and quantity, recalculating targets."""
         notifier = TelegramNotifier()
         active_trades = load_active_trades()
         found = False
@@ -132,6 +152,9 @@ class HealthHandler(BaseHTTPRequestHandler):
         for trade in active_trades:
             if trade["symbol"].upper() == symbol:
                 trade["cmp"] = entry_price
+                if quantity:
+                    trade["rec_shares"] = quantity
+                    trade["rec_capital"] = round(quantity * entry_price, 2)
                 # Recalculate +0.60% Target and -1.50% Stop Loss
                 trade["target_price"] = round(entry_price * (1.0 + (PROFIT_TARGET_PCT / 100.0)), 2)
                 trade["stop_loss_price"] = round(entry_price * (1.0 - (STOP_LOSS_PCT / 100.0)), 2)
@@ -143,10 +166,13 @@ class HealthHandler(BaseHTTPRequestHandler):
             clean_symbol = symbol.replace(".NS", "")
             target = next(t["target_price"] for t in active_trades if t["symbol"] == symbol)
             sl = next(t["stop_loss_price"] for t in active_trades if t["symbol"] == symbol)
+            qty = next(t["rec_shares"] for t in active_trades if t["symbol"] == symbol)
+            capital = next(t["rec_capital"] for t in active_trades if t["symbol"] == symbol)
             
             msg = (
                 f"✅ <b>Entry Updated for {clean_symbol}</b>\n\n"
-                f"• Actual Entry: ₹{entry_price:.2f}\n"
+                f"• Entry Price: ₹{entry_price:.2f}\n"
+                f"• Quantity: {qty} shares (~₹{capital:.0f})\n"
                 f"• Target (+0.60%): 🎯 <b>₹{target:.2f}</b>\n"
                 f"• Stop Loss (-1.50%): 🛡️ <b>₹{sl:.2f}</b>\n\n"
                 f"<i>Exit alerts will now trigger at these updated levels.</i>"
@@ -155,6 +181,75 @@ class HealthHandler(BaseHTTPRequestHandler):
         else:
             clean_symbol = symbol.replace(".NS", "")
             notifier.send_message(f"❌ <b>Stock {clean_symbol} not found</b> in yesterday's active BTST list.")
+
+    def handle_close_trade_command(self, symbol: str, exit_price: float):
+        """Close trade, calculate P&L, update journal file, and notify user."""
+        notifier = TelegramNotifier()
+        active_trades = load_active_trades()
+        found_trade = None
+        
+        for trade in active_trades:
+            if trade["symbol"].upper() == symbol:
+                found_trade = trade
+                break
+                
+        if found_trade:
+            # Remove from active trades
+            active_trades.remove(found_trade)
+            save_active_trades(active_trades)
+            
+            entry_price = found_trade["cmp"]
+            qty = found_trade.get("rec_shares", 1)
+            
+            # Calculate Profit/Loss
+            pnl_rupees = round((exit_price - entry_price) * qty, 2)
+            pnl_pct = round(((exit_price - entry_price) / entry_price) * 100.0, 2)
+            
+            # Save to journal history file
+            history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trade_journal.json")
+            history = []
+            if os.path.exists(history_file):
+                try:
+                    with open(history_file, "r") as f:
+                        history = json.load(f)
+                except Exception:
+                    history = []
+                    
+            journal_entry = {
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "symbol": symbol.replace(".NS", ""),
+                "entry": entry_price,
+                "exit": exit_price,
+                "qty": qty,
+                "pnl_rupees": pnl_rupees,
+                "pnl_pct": pnl_pct
+            }
+            history.append(journal_entry)
+            try:
+                with open(history_file, "w") as f:
+                    json.dump(history, f, indent=4)
+            except Exception as e:
+                logger.error(f"Failed to write trade history: {e}")
+                
+            clean_symbol = symbol.replace(".NS", "")
+            pnl_sign = "+" if pnl_rupees >= 0 else ""
+            pnl_emoji = "🟢 Profit" if pnl_rupees >= 0 else "🔴 Loss"
+            
+            msg = (
+                f"📊 <b>Trade Journaled successfully!</b>\n\n"
+                f"• Stock: <b>{clean_symbol}</b>\n"
+                f"• Action: {pnl_emoji}\n"
+                f"• Entry: ₹{entry_price:.2f} | Exit: ₹{exit_price:.2f}\n"
+                f"• Quantity: {qty} shares\n"
+                f"• Return: <b>{pnl_sign}{pnl_pct:.2f}%</b>\n"
+                f"• Net P&L: <b>{pnl_sign}₹{pnl_rupees:.2f}</b>\n\n"
+                f"<i>Trade has been logged to your journal and removed from active tracking.</i>"
+            )
+            notifier.send_message(msg)
+        else:
+            clean_symbol = symbol.replace(".NS", "")
+            # Default fallback if they closed a trade not found in active list
+            notifier.send_message(f"❌ <b>Stock {clean_symbol} not found</b> in active trades. Cannot calculate P&L.")
 
     def log_message(self, format, *args):
         return  # Suppress HTTP access logs
