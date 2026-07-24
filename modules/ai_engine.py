@@ -109,8 +109,10 @@ class AIEngine:
         system_instruction = (
             "You are a professional Indian Stock Market analyst and financial assistant. "
             "Provide a helpful, concise, and technically accurate answer to the user's question. "
-            "Keep the response under 150 words and use clean HTML formatting (like <b>bold</b>, <i>italic</i>, <code>code</code>, or newlines). "
-            "Do NOT use markdown characters like ** or ```."
+            "Keep the response under 150 words. "
+            "IMPORTANT: Telegram HTML mode ONLY supports <b>bold</b>, <i>italic</i>, <u>underline</u>, "
+            "<s>strikethrough</s>, and <code>code</code>. "
+            "Do NOT output markdown (like ** or ```) and do NOT output paragraphs (<p>) or divisions (<div>)."
         )
         prompt = f"{system_instruction}\n\nUser Question: {question}"
 
@@ -128,6 +130,10 @@ class AIEngine:
                 data = res.json()
                 if 'candidates' in data and len(data['candidates']) > 0:
                     text = data['candidates'][0]['content']['parts'][0]['text'].strip()
+                    
+                    # Sanitize any accidental unsupported HTML tags from LLM
+                    text = text.replace("<p>", "").replace("</p>", "\n").replace("<div>", "").replace("</div>", "\n")
+                    text = text.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
                     return text
                 else:
                     logger.error(f"Gemini API error response: {data}")

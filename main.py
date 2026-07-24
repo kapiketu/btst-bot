@@ -42,10 +42,14 @@ stream_handler.setFormatter(log_formatter)
 list_handler = ListLogHandler()
 list_handler.setFormatter(log_formatter)
 
+# Configure Root Logger to capture all module logs
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.handlers = []  # Clear defaults
+root_logger.addHandler(stream_handler)
+root_logger.addHandler(list_handler)
+
 logger = logging.getLogger("BTSTBot")
-logger.setLevel(logging.INFO)
-logger.addHandler(stream_handler)
-logger.addHandler(list_handler)
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -140,7 +144,13 @@ class HealthHandler(BaseHTTPRequestHandler):
                         ai = AIEngine()
                         ai_reply = ai.ask_ai(text)
                         logger.info(f"Received Gemini reply: {ai_reply[:50]}...")
-                        notifier.send_message(ai_reply)
+                        # Try sending as HTML first, fallback to plain text if Telegram rejects HTML tags
+                        success = notifier.send_message(ai_reply, parse_mode="HTML")
+                        if not success:
+                            logger.warning("Telegram failed to send HTML message, falling back to plain text...")
+                            # Strip common HTML tags to make it clean plain text
+                            clean_reply = re.sub(r"<[^>]+>", "", ai_reply)
+                            notifier.send_message(clean_reply, parse_mode=None)
                         logger.info("Sent reply to Telegram.")
             except Exception as e:
                 logger.exception(f"Error handling Telegram webhook POST: {e}")
