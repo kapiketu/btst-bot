@@ -101,6 +101,39 @@ class AIEngine:
             "rationale": str(data.get("rationale", "Strong volume breakout setup."))
         }
 
+    def ask_ai(self, question: str) -> str:
+        """Answer general financial market questions."""
+        if not self.api_key or self.api_key.startswith("your_"):
+            return "❌ Gemini API key not configured."
+
+        system_instruction = (
+            "You are a professional Indian Stock Market analyst and financial assistant. "
+            "Provide a helpful, concise, and technically accurate answer to the user's question. "
+            "Keep the response under 150 words and use clean HTML formatting (like <b>bold</b>, <i>italic</i>, <code>code</code>, or newlines). "
+            "Do NOT use markdown characters like ** or ```."
+        )
+        prompt = f"{system_instruction}\n\nUser Question: {question}"
+
+        try:
+            if self.provider == "gemini":
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.api_key}"
+                payload = {"contents": [{"parts": [{"text": prompt}]}]}
+                proxies = None
+                if "PYTHONANYWHERE_DOMAIN" in os.environ or "http_proxy" in os.environ or "HTTP_PROXY" in os.environ or os.path.exists("/etc/pythonanywhere"):
+                    proxies = {"http": "http://proxy.server:3128", "https": "http://proxy.server:3128"}
+                session = requests.Session()
+                if proxies:
+                    session.trust_env = False
+                res = session.post(url, json=payload, proxies=proxies, timeout=15)
+                data = res.json()
+                text = data['candidates'][0]['content']['parts'][0]['text'].strip()
+                return text
+            else:
+                return "❌ Chat feature currently only configured for Gemini provider."
+        except Exception as e:
+            logger.error(f"Failed to fetch response from Gemini: {e}")
+            return f"❌ Error contacting Gemini: {e}"
+
     def _fallback_analysis(self, stock_metrics: dict) -> dict:
         symbol = stock_metrics['symbol'].replace('.NS', '')
         rvol = stock_metrics['rvol']

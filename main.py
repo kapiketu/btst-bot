@@ -105,9 +105,18 @@ class HealthHandler(BaseHTTPRequestHandler):
                 if found_symbol and found_price:
                     self.handle_custom_entry_command(found_symbol, found_price)
                 else:
-                    # Fallback helper if only partial info is sent
+                    # General Q&A / Chat mode
+                    # If user sends a command like /start, ignore or send welcome message.
+                    # Otherwise, query Gemini to answer their question.
                     notifier = TelegramNotifier()
-                    notifier.send_message("💡 <b>Tip:</b> To update your entry, just type the stock name and your price. Example: <code>JSWSTEEL 1265</code>")
+                    if text.startswith("/start"):
+                        notifier.send_message("👋 <b>Welcome to your BTST Bot!</b>\n\n• Type a stock name & price to track entry: e.g. <code>JSWSTEEL 1265</code>\n• Or ask me any question about the stock market, sentiment, or indicators!")
+                    else:
+                        # Call Gemini to generate a response
+                        notifier.send_message("🔍 <i>Analyzing market cues...</i>")
+                        ai = AIEngine()
+                        ai_reply = ai.ask_ai(text)
+                        notifier.send_message(ai_reply)
             except Exception as e:
                 logger.error(f"Error handling Telegram webhook POST: {e}")
         else:
