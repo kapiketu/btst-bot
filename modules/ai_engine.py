@@ -126,8 +126,13 @@ class AIEngine:
                     session.trust_env = False
                 res = session.post(url, json=payload, proxies=proxies, timeout=15)
                 data = res.json()
-                text = data['candidates'][0]['content']['parts'][0]['text'].strip()
-                return text
+                if 'candidates' in data and len(data['candidates']) > 0:
+                    text = data['candidates'][0]['content']['parts'][0]['text'].strip()
+                    return text
+                else:
+                    logger.error(f"Gemini API error response: {data}")
+                    err_msg = data.get("error", {}).get("message", "Unknown error")
+                    return f"❌ Gemini API Error: {err_msg}"
             else:
                 return "❌ Chat feature currently only configured for Gemini provider."
         except Exception as e:

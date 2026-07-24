@@ -85,11 +85,12 @@ class HealthHandler(BaseHTTPRequestHandler):
 
                 # Smart Parsing: Look for any stock symbol from STOCK_UNIVERSE in the text
                 found_symbol = None
-                upper_text = text.upper()
+                normalized_text = re.sub(r"[^A-Z0-9]", "", text.upper())
                 for stock in STOCK_UNIVERSE:
                     clean_stock = stock.replace(".NS", "")
-                    # Match clean stock symbol in text (e.g. JSWSTEEL or BAJAJ-AUTO)
-                    if clean_stock in upper_text:
+                    normalized_stock = re.sub(r"[^A-Z0-9]", "", clean_stock)
+                    # Match normalized stock symbol in text (e.g. BAJAJAUTO)
+                    if normalized_stock in normalized_text:
                         found_symbol = stock
                         break
 
