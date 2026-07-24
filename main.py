@@ -63,6 +63,75 @@ class HealthHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
+        
+    def do_POST(self):
+        if self.path == "/telegram-webhook":
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            self.send_response(200)
+            self.end_headers()
+            
+            try:
+                update = json.loads(post_data.decode("utf-8"))
+                message = update.get("message", {})
+                text = message.get("text", "").strip()
+                chat_id = message.get("chat", {}).get("id")
+                
+                # Check for /buy or /entry command
+                if text.lower().startswith(("/buy", "/entry")) and chat_id:
+                    parts = text.split()
+                    if len(parts) >= 3:
+                        symbol = parts[1].upper()
+                        if not symbol.endswith(".NS"):
+                            symbol += ".NS"
+                        try:
+                            custom_entry = float(parts[2])
+                            self.handle_custom_entry_command(symbol, custom_entry)
+                        except ValueError:
+                            notifier = TelegramNotifier()
+                            notifier.send_message("❌ <b>Invalid format.</b> Use: <code>/buy JSWSTEEL 1265.50</code>")
+                    else:
+                        notifier = TelegramNotifier()
+                        notifier.send_message("❌ <b>Invalid format.</b> Use: <code>/buy JSWSTEEL 1265.50</code>")
+            except Exception as e:
+                logger.error(f"Error handling Telegram webhook POST: {e}")
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def handle_custom_entry_command(self, symbol: str, entry_price: float):
+        """Update active trade with custom entry price and recalculate targets."""
+        notifier = TelegramNotifier()
+        active_trades = load_active_trades()
+        found = False
+        
+        for trade in active_trades:
+            if trade["symbol"].upper() == symbol:
+                trade["cmp"] = entry_price
+                # Recalculate +0.60% Target and -1.50% Stop Loss
+                trade["target_price"] = round(entry_price * (1.0 + (PROFIT_TARGET_PCT / 100.0)), 2)
+                trade["stop_loss_price"] = round(entry_price * (1.0 - (STOP_LOSS_PCT / 100.0)), 2)
+                found = True
+                break
+                
+        if found:
+            save_active_trades(active_trades)
+            clean_symbol = symbol.replace(".NS", "")
+            target = next(t["target_price"] for t in active_trades if t["symbol"] == symbol)
+            sl = next(t["stop_loss_price"] for t in active_trades if t["symbol"] == symbol)
+            
+            msg = (
+                f"✅ <b>Entry Updated for {clean_symbol}</b>\n\n"
+                f"• Actual Entry: ₹{entry_price:.2f}\n"
+                f"• Target (+0.60%): 🎯 <b>₹{target:.2f}</b>\n"
+                f"• Stop Loss (-1.50%): 🛡️ <b>₹{sl:.2f}</b>\n\n"
+                f"<i>Exit alerts will now trigger at these updated levels.</i>"
+            )
+            notifier.send_message(msg)
+        else:
+            clean_symbol = symbol.replace(".NS", "")
+            notifier.send_message(f"❌ <b>Stock {clean_symbol} not found</b> in yesterday's active BTST list.")
+
     def log_message(self, format, *args):
         return  # Suppress HTTP access logs
 
@@ -189,10 +258,26 @@ def run_morning_exit_monitor():
     # Reset active trades after morning check
     save_active_trades([])
 
+def register_telegram_webhook():
+    """Register Render server URL with Telegram API for webhooks."""
+    time.sleep(5)  # Wait for server to boot
+    from config import TELEGRAM_BOT_TOKEN
+    if TELEGRAM_BOT_TOKEN and not TELEGRAM_BOT_TOKEN.startswith("your_"):
+        webhook_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook?url=https://btst-bot.onrender.com/telegram-webhook"
+        try:
+            import requests
+            res = requests.get(webhook_url, timeout=10)
+            logger.info(f"Telegram webhook registration response: {res.json()}")
+        except Exception as e:
+            logger.error(f"Error registering Telegram webhook: {e}")
+
 def start_scheduler():
     """Start daemon scheduler for automated daily operations."""
     # Start background health server for Render port binding
     threading.Thread(target=start_health_server, daemon=True).start()
+    
+    # Register Telegram Webhook in background
+    threading.Thread(target=register_telegram_webhook, daemon=True).start()
     
     logger.info("BTST Bot Scheduler Running... Press Ctrl+C to exit.")
     
